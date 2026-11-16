@@ -49,10 +49,10 @@ export async function POST(req:NextRequest){
     const key=process.env.TAVILY_API_KEY;
     if(!key) return NextResponse.json({error:'Search is not configured. Add TAVILY_API_KEY in Vercel environment variables.'},{status:503});
     const body=await req.json(); const query=String(body.query||'').trim(); const limit=Math.floor(Number(body.limit));
-    const scope=body.scope==='business'?'business':body.scope==='professional'?'professional':'both';
+    const scope=body.scope==='business'?'business':body.scope==='professional'?'professional':body.scope==='personal'?'personal':'both';
     if(query.length<2||query.length>180) return NextResponse.json({error:'Enter a search phrase between 2 and 180 characters.'},{status:400});
     if(!Number.isInteger(limit)||limit<1||limit>500) return NextResponse.json({error:'Result limit must be between 1 and 500.'},{status:400});
-    const hints=scope==='business'?'business contact email':scope==='professional'?'professional contact email':'business OR professional contact email';
+    const hints=scope==='business'?'business contact email':scope==='professional'?'professional contact email':scope==='personal'?'publicly listed personal contact email (personal email address)': 'business OR professional OR publicly listed personal contact email';
     const sr=await fetch('https://api.tavily.com/search',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({api_key:key,query:`${query} ${hints} (contact OR about OR team)`,search_depth:'basic',max_results:20,include_raw_content:false}),signal:AbortSignal.timeout(12000)});
     if(!sr.ok) return NextResponse.json({error:`Tavily returned ${sr.status}. Check your API key and available credits.`},{status:502});
     const data=await sr.json(); const items=(data.results||[]) as Array<{url:string;title?:string;content?:string}>;
