@@ -161,6 +161,7 @@ export async function POST(req:NextRequest){
     state={pages:Array.from(pageMap.values()).slice(0,240),cursor:0,seen:Array.from(seen).slice(-12000),scanned:0,sourceCount:pageMap.size,found:0,round:0};
   }else{
     state=body.state as JobState;
+    if(state&&!Number.isInteger(state.round))state.round=0;
     if(!state||!Array.isArray(state.pages)||!Array.isArray(state.seen)||!Number.isInteger(state.cursor))return NextResponse.json({error:'Extraction session expired. Start a new search.'},{status:400});
     for(const email of state.seen)seen.add(String(email).toLowerCase());
   }
