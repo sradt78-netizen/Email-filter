@@ -118,7 +118,7 @@ export async function POST(req:NextRequest){
     function collect(text:string,source:string,title:string){
       EMAIL_RE.lastIndex=0;
       for(const raw of (text.match(EMAIL_RE)||[])){
-        const email=raw.replace(/[.,;:!?)}\\]>]+$/,'').toLowerCase();
+        const email=raw.replace(/[.,;:!?)}\]>]+$/,'').toLowerCase();
         const domain=email.split('@')[1];
         if(!domain||seen.has(email)) continue;
         if(scope==='personal'&&!PERSONAL_EMAIL_DOMAINS.has(domain)) continue;
