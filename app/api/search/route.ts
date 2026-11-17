@@ -112,7 +112,7 @@ export async function POST(req:NextRequest){
     for(const email of state.seen)seen.add(String(email).toLowerCase());
   }
   const snippetResults=phase==='start'?await makeResults(newCandidates.slice(0,Math.max(0,limit))):[];
-  if(phase==='start') state={...state,found:snippetResults.length};\n  const remaining=limit-snippetResults.length;
+  if(phase==='start') state={...state,found:snippetResults.length};\n  const remaining=Math.max(0,limit-state.found);
   const batchSize=6;
   const batch=remaining>0?state.pages.slice(state.cursor,state.cursor+batchSize):[];
   const fetched=await Promise.all(batch.map(async item=>({item,page:await fetchPage(item.url)})));
