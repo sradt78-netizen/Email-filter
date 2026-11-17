@@ -9,7 +9,7 @@ export const maxDuration = 60;
 type Status = 'valid' | 'invalid' | 'unverified';
 type Result = { email:string; domain:string; source:string; title:string; status:Status; reason:string };
 type SearchHit = { url:string; title?:string; content?:string };
-const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
+const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
 
 // Personal means a publicly listed address on a consumer mailbox provider.
@@ -32,7 +32,7 @@ function isPublicIp(ip:string) {
 }
 async function allowedByRobots(url:URL):Promise<boolean>{
   try {
-    const r=await fetch(new URL('/robots.txt',url.origin),{signal:AbortSignal.timeout(3500),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)'}});
+    const r=await fetch(new URL('/robots.txt',url.origin),{signal:AbortSignal.timeout(2500),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)'}});
     if(!r.ok) return r.status===404;
     return robotsParser(url.origin+'/robots.txt',await r.text()).isAllowed(url.href,'OpenContactBot')!==false;
   } catch { return false; }
@@ -43,12 +43,12 @@ async function fetchPage(raw:string):Promise<{text:string;url:string}|null>{
     const host=u.hostname.toLowerCase(); if(host==='localhost'||host.endsWith('.local')) return null;
     const ips=await dns.lookup(host,{all:true,verbatim:true}); if(!ips.length||ips.some(x=>!isPublicIp(x.address))) return null;
     if(!(await allowedByRobots(u))) return null;
-    const res=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(6500),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)','Accept':'text/html,application/xhtml+xml'}});
+    const res=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(5000),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)','Accept':'text/html,application/xhtml+xml'}});
     if(res.status>=300&&res.status<400) return null;
     const type=res.headers.get('content-type')||''; if(!res.ok||!type.includes('text/html')) return null;
     const len=Number(res.headers.get('content-length')||0); if(len>1000000) return null;
     const html=(await res.text()).slice(0,1000000);
-    const text=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\\s+/g,' ');
+    const text=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\s+/g,' ');
     return {text,url:u.href};
   } catch { return null; }
 }
@@ -112,14 +112,6 @@ export async function POST(req:NextRequest){
     const maxPages=Math.min(160,Math.max(1,Number(process.env.MAX_PAGES_PER_SEARCH)||120));
     const pages=Array.from(uniquePages.values()).slice(0,maxPages);
 
-    // Bounded crawler concurrency protects the 60-second serverless runtime.
-    const scraped:Array<{item:{url:string;title:string};page:{text:string;url:string}|null}>=[];
-    const concurrency=30;
-    for(let i=0;i<pages.length;i+=concurrency){
-      const batch=await Promise.all(pages.slice(i,i+concurrency).map(async item=>({item,page:await fetchPage(item.url)})));
-      scraped.push(...batch);
-    }
-
     const seen=new Set<string>();
     const candidates:Array<{email:string;source:string;title:string}>=[];
     const candidateCap=Math.min(3000,Math.max(limit*5,500));
@@ -136,11 +128,24 @@ export async function POST(req:NextRequest){
         if(candidates.length>=candidateCap) return;
       }
     }
+
+    // Extract indexed search snippets first. Crawl more pages only when the snippets
+    // do not contain enough scope-matching addresses.
     for(const hit of snippets){collect(hit.text,hit.url,hit.title);if(candidates.length>=candidateCap) break;}
-    if(candidates.length<candidateCap){
-      for(const {item,page} of scraped){
-        if(page) collect(page.text,page.url,item.title);
-        if(candidates.length>=candidateCap) break;
+
+    const maxPages=Math.min(160,Math.max(1,Number(process.env.MAX_PAGES_PER_SEARCH)||120));
+    const pages=Array.from(uniquePages.values()).slice(0,maxPages);
+    const scraped:Array<{item:{url:string;title:string};page:{text:string;url:string}|null}>=[];
+    const desiredCandidates=Math.min(candidateCap,Math.max(limit*3,150));
+    if(candidates.length<desiredCandidates){
+      const concurrency=30;
+      for(let i=0;i<pages.length&&candidates.length<desiredCandidates;i+=concurrency){
+        const batch=await Promise.all(pages.slice(i,i+concurrency).map(async item=>({item,page:await fetchPage(item.url)})));
+        scraped.push(...batch);
+        for(const {item,page} of batch){
+          if(page) collect(page.text,page.url,item.title);
+          if(candidates.length>=desiredCandidates) break;
+        }
       }
     }
 
