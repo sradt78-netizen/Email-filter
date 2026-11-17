@@ -151,7 +151,7 @@ export async function POST(req:NextRequest){
   const totalScanned=state.scanned;
   return NextResponse.json({
     results, state, done, progress:{target:limit,found:state.found,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
-    note:`Country filter: ${country}. ${state.found} addresses found so far. MX checks confirm domain mail routing only; they do not confirm that a specific mailbox exists or can receive messages. The extractor scans publicly indexed pages and pages that permit crawling; 10,000 is the maximum target, not a guaranteed supply of public addresses.`
+    note:`Country filter: ${country}. ${state.found} addresses found so far. Sources titled as tutorials, documentation, samples or programming examples are excluded, and each address must appear near contact-related context. MX checks confirm domain mail routing only; they do not confirm that a specific mailbox exists or can receive messages. The extractor scans publicly indexed pages and pages that permit crawling; 10,000 is the maximum target, not a guaranteed supply of public addresses.`
   });
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unexpected search error'},{status:500});}
 }
