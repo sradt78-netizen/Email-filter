@@ -57,18 +57,18 @@ async function validate(email:string):Promise<{status:Status;reason:string}>{
   try {const mx=await dns.resolveMx(domain);return mx.length?{status:'valid',reason:'MX records found; mailbox itself is not confirmed'}:{status:'unverified',reason:'No MX record found'};}
   catch {try{await dns.resolve4(domain);return {status:'unverified',reason:'Domain resolves, but mail routing could not be confirmed'};}catch{return {status:'unverified',reason:'Domain could not be verified'};}}
 }
-const EXAMPLE_SOURCE_TERMS = /\\b(example|sample|demo|tutorial|how[- ]to|documentation|docs|template|placeholder|dummy|fake|test data|lorem ipsum|code snippet|regex|programming|developer guide|api reference|stackoverflow|w3schools|geeksforgeeks)\\b/i;
-const CONTACT_CONTEXT = /\\b(contact|email|e-mail|reach|write to|mail to|author|editor|staff|team|faculty|directory|member|profile|about us|press inquiries|media inquiries|for inquiries)\\b/i;
-const EXAMPLE_CONTEXT = /\\b(example|sample|dummy|fake|placeholder|test address|for instance|e\\.g\\.|such as|replace this|your[- ]?email|name@|user@|john doe|jane doe)\\b/i;
+const EXAMPLE_SOURCE_TERMS = /\b(example|sample|demo|tutorial|how[- ]to|documentation|docs|template|placeholder|dummy|fake|test data|lorem ipsum|code snippet|regex|programming|developer guide|api reference|stackoverflow|w3schools|geeksforgeeks)\b/i;
+const CONTACT_CONTEXT = /\b(contact|email|e-mail|reach|write to|mail to|author|editor|staff|team|faculty|directory|member|profile|about us|press inquiries|media inquiries|for inquiries)\b/i;
+const EXAMPLE_CONTEXT = /\b(example|sample|dummy|fake|placeholder|test address|for instance|e\.g\.|such as|replace this|your[- ]?email|name@|user@|john doe|jane doe)\b/i;
 
 function isCredibleSource(source:string,title:string):boolean {
   try {
     const url=new URL(source);
-    const host=url.hostname.toLowerCase().replace(/^www\\./,'');
+    const host=url.hostname.toLowerCase().replace(/^www\./,'');
     const path=(url.pathname+' '+url.search).toLowerCase();
     if(EXAMPLE_SOURCE_TERMS.test(title+' '+path))return false;
     if(['example.com','example.org','example.net','localhost'].includes(host))return false;
-    if(/\\/(?:docs?|documentation|tutorials?|guides?|learn|training|blog\\/tag|tags|categories)\\//i.test(path))return false;
+    if(/\/(?:docs?|documentation|tutorials?|guides?|learn|training|blog\/tag|tags|categories)\//i.test(path))return false;
     return true;
   } catch { return false; }
 }
@@ -86,7 +86,7 @@ function extract(text:string,source:string,title:string,scope:string,seen:Set<st
   if(!isCredibleSource(source,title))return out;
   EMAIL_RE.lastIndex=0;
   for(const raw of (text.match(EMAIL_RE)||[])){
-    const email=raw.replace(/[.,;:!?)}\\]>]+$/,'').toLowerCase();const domain=email.split('@')[1];
+    const email=raw.replace(/[.,;:!?)}\]>]+$/,'').toLowerCase();const domain=email.split('@')[1];
     if(!domain||seen.has(email)||!isPlausiblePersonAddress(email))continue;
     if(!hasContactEvidence(text,email))continue;
     if(scope==='personal'&&!PERSONAL_EMAIL_DOMAINS.has(domain))continue;
