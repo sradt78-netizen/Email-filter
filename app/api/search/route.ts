@@ -10,7 +10,7 @@ type Status = 'valid' | 'unverified';
 type Result = { email:string; domain:string; source:string; title:string; status:Status; reason:string };
 type SearchHit = { url:string; title?:string; content?:string };
 type Page = {url:string;title:string};
-type JobState = {pages:Page[];cursor:number;seen:string[];scanned:number;sourceCount:number;found:number};
+type JobState = {pages:Page[];cursor:number;seen:string[];scanned:number;sourceCount:number;found:number;round:number};
 const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
 const ROLE_LOCAL_PARTS = new Set(['info','information','contact','contacts','support','help','admin','administrator','hello','hi','team','office','sales','service','services','enquiries','enquiry','inquiries','inquiry','noreply','no-reply','donotreply','do-not-reply','mailer-daemon','webmaster','postmaster','billing','accounts','accounting','payments','orders','careers','jobs','hr','humanresources','marketing','press','media','news','newsletter','feedback','notifications','notification','privacy','legal','abuse','security','root','test','testing','demo','example','sample','user','guest','mail','email','bot','robot']);
@@ -104,6 +104,33 @@ async function makeResults(candidates:Array<{email:string;source:string;title:st
   return out;
 }
 
+
+const MAX_SEARCH_ROUNDS = 5;
+function expansionTerms(scope:string, round:number):string[] {
+ const sets={
+ personal:['individual personal Gmail email contact','personal website author email address','public creator profile contact Gmail','independent professional personal email','public portfolio contact email address','writer blogger author contact email','freelancer individual contact address','public speaker personal contact email','artist personal website email contact','individual profile publicly listed email'],
+ business:['company staff directory direct email','small business owner contact email website','business association member email listing','company leadership team contact email','vendor supplier public contact email','local business directory email website','company employee profile work email','business team page email address','organization contact directory email','company about page staff email'],
+ professional:['consultant advisor professional profile email','faculty researcher staff directory email','professional association directory email','speaker author profile work email','public employee work contact email','specialist consultant contact details','professional portfolio email address','conference speaker contact email','researcher university profile email','expert professional directory email'],
+ both:['staff directory publicly listed email address','member directory contact email address','team page email address contact details','public profile email address contact information','association directory listed contact details','local directory business owner email','author contributor profile contact email','professional listings contact details email','organization people directory email','publicly posted email address contact page']
+ };
+ const source=sets[scope as keyof typeof sets]||sets.both, offset=(round*5)%source.length;
+ return Array.from({length:5},(_,i)=>source[(offset+i)%source.length]);
+}
+async function discoverMore(query:string,scope:string,country:string,round:number,key:string,seen:Set<string>){
+ const location=country==='Worldwide'?'':` in ${country}`, terms=expansionTerms(scope,round);
+ const searches=await Promise.all(terms.map(async term=>{
+  const response=await fetch('https://api.tavily.com/search',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({api_key:key,query:`${query}${location} ${term}`,search_depth:'advanced',max_results:20,include_raw_content:false}),signal:AbortSignal.timeout(20000)});
+  if(!response.ok)throw new Error(`Tavily returned ${response.status}. Check API credits and rate limits.`);
+  return await response.json() as {results?:SearchHit[]};
+ }));
+ const pages=new Map<string,Page>(), candidates:Array<{email:string;source:string;title:string}>=[];
+ for(const search of searches)for(const item of search.results||[]){
+  if(!item.url)continue;
+  try{const u=new URL(item.url);u.hash='';pages.set(u.href,{url:u.href,title:item.title||u.hostname});if(item.content)candidates.push(...extract(item.content,u.href,item.title||u.hostname,scope,seen));}catch{}
+ }
+ return {pages:Array.from(pages.values()),candidates};
+}
+
 export async function POST(req:NextRequest){
  try{
   const key=process.env.TAVILY_API_KEY;if(!key)return NextResponse.json({error:'Search is not configured. Add TAVILY_API_KEY in Vercel environment variables.'},{status:503});
@@ -131,14 +158,22 @@ export async function POST(req:NextRequest){
       if(!item.url)continue;
       try{const u=new URL(item.url);u.hash='';pageMap.set(u.href,{url:u.href,title:item.title||u.hostname});if(item.content)newCandidates.push(...extract(item.content,u.href,item.title||u.hostname,scope,seen));}catch{}
     }
-    state={pages:Array.from(pageMap.values()).slice(0,240),cursor:0,seen:Array.from(seen).slice(-12000),scanned:0,sourceCount:pageMap.size,found:0};
+    state={pages:Array.from(pageMap.values()).slice(0,240),cursor:0,seen:Array.from(seen).slice(-12000),scanned:0,sourceCount:pageMap.size,found:0,round:0};
   }else{
     state=body.state as JobState;
+    if(state&&!Number.isInteger(state.round))state.round=0;
     if(!state||!Array.isArray(state.pages)||!Array.isArray(state.seen)||!Number.isInteger(state.cursor))return NextResponse.json({error:'Extraction session expired. Start a new search.'},{status:400});
     for(const email of state.seen)seen.add(String(email).toLowerCase());
   }
-  const snippetResults=phase==='start'?await makeResults(newCandidates.slice(0,Math.max(0,limit))):[];
-  if(phase==='start') state={...state,found:snippetResults.length};
+  if(phase==='continue'&&state.cursor>=state.pages.length&&state.found<limit&&state.round<MAX_SEARCH_ROUNDS){
+    const expanded=await discoverMore(query,scope,country,state.round,key,seen);
+    const known=new Set(state.pages.map(p=>p.url));
+    const freshPages=expanded.pages.filter(p=>!known.has(p.url));
+    state={...state,pages:freshPages.slice(0,240),cursor:0,round:state.round+1,sourceCount:state.sourceCount+freshPages.length};
+    newCandidates=expanded.candidates;
+  }
+  const snippetResults=await makeResults(newCandidates.slice(0,Math.max(0,limit-state.found)));
+  if(snippetResults.length)state={...state,found:state.found+snippetResults.length};
   const remaining=Math.max(0,limit-state.found);
   const batchSize=6;
   const batch=remaining>0?state.pages.slice(state.cursor,state.cursor+batchSize):[];
@@ -149,7 +184,7 @@ export async function POST(req:NextRequest){
   state={...state,cursor:state.cursor+batch.length,seen:Array.from(seen).slice(-12000),scanned:state.scanned+fetched.filter(x=>x.page).length};
   const results=[...snippetResults,...pageResults].slice(0,limit);
   state={...state,found:state.found+pageResults.length};
-  const done=state.found>=limit||state.cursor>=state.pages.length;
+  const done=state.found>=limit||(state.cursor>=state.pages.length&&state.round>=MAX_SEARCH_ROUNDS);
   const totalScanned=state.scanned;
   return NextResponse.json({
     results, state, done, progress:{target:limit,found:state.found,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
