@@ -8,6 +8,7 @@ A Vercel-ready Next.js app for discovering business and professional email addre
 - The crawler checks robots.txt before fetching, rejects local/private IP destinations, blocks redirects, limits response size, and uses request timeouts.
 - An MX record confirms domain mail routing, not an individual mailbox, deliverability, or consent.
 - Search coverage is limited by provider quotas, crawl permissions, and the per-search page cap. A requested result count is a maximum, not a guarantee.
+- Personal-only mode includes publicly published addresses on consumer mailbox providers (for example Gmail, Yahoo, Outlook, iCloud and Proton) and excludes company-domain addresses. It cannot retrieve private or unpublished inboxes.
 - Use contact data in compliance with applicable privacy and anti-spam laws. Do not use the app for unsolicited bulk messaging.
 
 ## Run locally
@@ -23,7 +24,7 @@ npm run dev
 
 1. Import this GitHub repository into Vercel.
 2. Add `TAVILY_API_KEY` as an encrypted environment variable.
-3. Optionally set `MAX_PAGES_PER_SEARCH` (default 12, maximum 20).
+3. Optionally set `MAX_PAGES_PER_SEARCH` (default 120, maximum 160). Higher values can increase search duration and provider usage.
 4. Redeploy after adding environment variables.
 
 Create a Tavily key at https://app.tavily.com/.
@@ -36,4 +37,4 @@ Create a Tavily key at https://app.tavily.com/.
 {"query":"accounting firms in Manchester","scope":"both","limit":100}
 ```
 
-`scope` is `both`, `business`, or `professional`. `limit` is an integer from 1 to 500.
+`scope` is `both`, `business`, `professional`, or `personal`. Personal mode filters results to consumer mailbox providers; Business and Professional modes exclude those consumer providers. `limit` is an integer from 1 to 500.
