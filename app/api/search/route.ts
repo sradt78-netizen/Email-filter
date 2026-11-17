@@ -138,7 +138,8 @@ export async function POST(req:NextRequest){
     for(const email of state.seen)seen.add(String(email).toLowerCase());
   }
   const snippetResults=phase==='start'?await makeResults(newCandidates.slice(0,Math.max(0,limit))):[];
-  if(phase==='start') state={...state,found:snippetResults.length};\n  const remaining=Math.max(0,limit-state.found);
+  if(phase==='start') state={...state,found:snippetResults.length};
+  const remaining=Math.max(0,limit-state.found);
   const batchSize=6;
   const batch=remaining>0?state.pages.slice(state.cursor,state.cursor+batchSize):[];
   const fetched=await Promise.all(batch.map(async item=>({item,page:await fetchPage(item.url)})));
@@ -147,7 +148,8 @@ export async function POST(req:NextRequest){
   const pageResults=remaining>0?await makeResults(crawledCandidates.slice(0,remaining)): [];
   state={...state,cursor:state.cursor+batch.length,seen:Array.from(seen).slice(-12000),scanned:state.scanned+fetched.filter(x=>x.page).length};
   const results=[...snippetResults,...pageResults].slice(0,limit);
-  state={...state,found:state.found+pageResults.length};\n  const done=state.found>=limit||state.cursor>=state.pages.length;
+  state={...state,found:state.found+pageResults.length};
+  const done=state.found>=limit||state.cursor>=state.pages.length;
   const totalScanned=state.scanned;
   return NextResponse.json({
     results, state, done, progress:{target:limit,found:state.found,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
