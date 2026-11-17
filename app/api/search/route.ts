@@ -90,10 +90,10 @@ export async function POST(req:NextRequest){
   let state:JobState;let newCandidates:Array<{email:string;source:string;title:string}>=[];
   const seen=new Set<string>();
   if(phase==='start'){
-    const terms=scope==='business'?['company contact page business email','official company website contact email','business directory company email','local business public email contacts','company team and staff contact page','public company contact directory']
-      :scope==='professional'?['professional work email public profile','consultant professional directory work email','staff biography work contact email','professional association member contact email','publicly listed employee work email','specialist public professional contact']
-      :scope==='personal'?['public personal Gmail Yahoo Outlook contact','individual publicly listed Gmail address','personal website contact email','blog author personal email contact','public creator writer email address','individual public personal mailbox contact']
-      :['public business and professional email directory','company team staff contact email','publicly listed individual contact email','business website contact information','professional profile email address','public contact directory email'];
+    const terms=scope==='business'?['company contact page business email','official company website contact email','business directory company email','local business public email contacts','company team and staff contact page','public company contact directory','small business owner public email contact','business association member contact email','company about us leadership contact email','public vendor supplier contact email']
+      :scope==='professional'?['professional work email public profile','consultant professional directory work email','staff biography work contact email','professional association member contact email','publicly listed employee work email','specialist public professional contact','speaker author professional contact email','researcher faculty public email address','advisor coach consultant contact email','conference speaker public work email']
+      :scope==='personal'?['public personal Gmail Yahoo Outlook contact','individual publicly listed Gmail address','personal website contact email','blog author personal email contact','public creator writer email address','individual public personal mailbox contact','independent artist public email address','personal portfolio contact email','freelancer public contact email address','publicly published individual email contact']
+      :['public business and professional email directory','company team staff contact email','publicly listed individual contact email','business website contact information','professional profile email address','public contact directory email','business association contact email directory','public speaker author contact details','small business public contact information','consultant freelancer public email address'];
     const location=country==='Worldwide'?'':` in ${country}`;
     const searches=await Promise.all(terms.map(async term=>{
       const response=await fetch('https://api.tavily.com/search',{method:'POST',headers:{'Content-Type':'application/json','Accept':'application/json'},body:JSON.stringify({api_key:key,query:`${query}${location} ${term}`,search_depth:'advanced',max_results:20,include_raw_content:false}),signal:AbortSignal.timeout(20000)});
@@ -125,7 +125,7 @@ export async function POST(req:NextRequest){
   const totalScanned=state.scanned;
   return NextResponse.json({
     results, state, done, progress:{target:limit,found:state.found,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
-    note:`Country filter: ${country}. ${results.length} addresses found so far. MX checks confirm domain mail routing only; they do not confirm that a specific mailbox exists or can receive messages. The extractor scans publicly indexed pages and pages that permit crawling; 10,000 is the maximum target, not a guaranteed supply of public addresses.`
+    note:`Country filter: ${country}. ${state.found} addresses found so far. MX checks confirm domain mail routing only; they do not confirm that a specific mailbox exists or can receive messages. The extractor scans publicly indexed pages and pages that permit crawling; 10,000 is the maximum target, not a guaranteed supply of public addresses.`
   });
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unexpected search error'},{status:500});}
 }
