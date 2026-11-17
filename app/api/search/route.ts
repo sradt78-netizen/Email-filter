@@ -109,8 +109,6 @@ export async function POST(req:NextRequest){
         if(item.content) snippets.push({text:item.content,url,title:item.title||normalized.hostname});
       } catch {}
     }
-    const maxPages=Math.min(160,Math.max(1,Number(process.env.MAX_PAGES_PER_SEARCH)||120));
-    const pages=Array.from(uniquePages.values()).slice(0,maxPages);
 
     const seen=new Set<string>();
     const candidates:Array<{email:string;source:string;title:string}>=[];
