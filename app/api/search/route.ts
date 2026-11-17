@@ -17,7 +17,7 @@ const ROLE_LOCAL_PARTS = new Set([
   'noreply','no-reply','donotreply','do-not-reply','mailer-daemon','webmaster','postmaster',
   'billing','accounts','accounting','payments','orders','careers','jobs','hr','humanresources',
   'marketing','press','media','news','newsletter','feedback','notifications','notification',
-  'privacy','legal','abuse','security',' webmaster','root','administrator','test','testing',
+  'privacy','legal','abuse','security','root','administrator','test','testing',
   'demo','example','sample','user','guest','mail','email','bot','robot'
 ]);
 const PLACEHOLDER_LOCAL_PARTS = /(?:^|[._-])(test|testing|fake|dummy|sample|example|placeholder|invalid|unknown|nobody|none)(?:$|[._-])/i;
