@@ -26,7 +26,7 @@ export default function Home(){
   let state:JobState|null=null;let phase:'start'|'continue'='start';let keepGoing=true;
   try{
    while(keepGoing){
-    const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phase,query,scope,country,limit:effectiveLimit,state})});
+    const response: Response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phase,query,scope,country,limit:effectiveLimit,state})});
     const data=await response.json();if(!response.ok)throw new Error(data.error||'Search failed');
     appendRows(data.results||[]);state=data.state||state;setJobState(state);
     if(data.progress)setProgress(data.progress);
@@ -44,7 +44,7 @@ export default function Home(){
   setError('');setLoading(true);let state=jobState;
   try{
    while(state.cursor<state.pages.length&&rows.length<effectiveLimit){
-    const response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phase:'continue',query,scope,country,limit:effectiveLimit,state})});
+    const response: Response=await fetch('/api/search',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phase:'continue',query,scope,country,limit:effectiveLimit,state})});
     const data=await response.json();if(!response.ok)throw new Error(data.error||'Search failed');
     appendRows(data.results||[]);state=data.state;setJobState(state);if(data.progress)setProgress(data.progress);if(data.note)setSearchNote(data.note);
     if(data.done)break;setStatusText(`Resuming scan… ${data.progress?.found||0} of ${effectiveLimit} found`);
