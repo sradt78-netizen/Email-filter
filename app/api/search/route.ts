@@ -8,8 +8,21 @@ export const maxDuration = 60;
 
 type Status = 'valid' | 'invalid' | 'unverified';
 type Result = { email:string; domain:string; source:string; title:string; status:Status; reason:string };
-const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
+type SearchHit = { url:string; title?:string; content?:string };
+const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
+
+// Personal means a publicly listed address on a consumer mailbox provider.
+// Company-owned domains are deliberately excluded from Personal-only results.
+const PERSONAL_EMAIL_DOMAINS = new Set([
+  'gmail.com','googlemail.com','yahoo.com','yahoo.co.uk','yahoo.ca','yahoo.com.au','ymail.com','rocketmail.com',
+  'outlook.com','hotmail.com','hotmail.co.uk','live.com','live.co.uk','msn.com',
+  'icloud.com','me.com','mac.com','aol.com','aim.com',
+  'proton.me','protonmail.com','pm.me','tutanota.com','tuta.io',
+  'gmx.com','gmx.net','mail.com','email.com','usa.com',
+  'yandex.com','yandex.ru','fastmail.com','fastmail.fm','hey.com',
+  'zoho.com'
+]);
 
 function isPublicIp(ip:string) {
   const v=net.isIP(ip);
@@ -19,7 +32,7 @@ function isPublicIp(ip:string) {
 }
 async function allowedByRobots(url:URL):Promise<boolean>{
   try {
-    const r=await fetch(new URL('/robots.txt',url.origin),{signal:AbortSignal.timeout(4000),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)'}});
+    const r=await fetch(new URL('/robots.txt',url.origin),{signal:AbortSignal.timeout(3500),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)'}});
     if(!r.ok) return r.status===404;
     return robotsParser(url.origin+'/robots.txt',await r.text()).isAllowed(url.href,'OpenContactBot')!==false;
   } catch { return false; }
@@ -30,12 +43,12 @@ async function fetchPage(raw:string):Promise<{text:string;url:string}|null>{
     const host=u.hostname.toLowerCase(); if(host==='localhost'||host.endsWith('.local')) return null;
     const ips=await dns.lookup(host,{all:true,verbatim:true}); if(!ips.length||ips.some(x=>!isPublicIp(x.address))) return null;
     if(!(await allowedByRobots(u))) return null;
-    const res=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(7000),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)','Accept':'text/html,application/xhtml+xml'}});
+    const res=await fetch(u,{redirect:'manual',signal:AbortSignal.timeout(6500),headers:{'User-Agent':'OpenContactBot/1.0 (+public contact discovery)','Accept':'text/html,application/xhtml+xml'}});
     if(res.status>=300&&res.status<400) return null;
     const type=res.headers.get('content-type')||''; if(!res.ok||!type.includes('text/html')) return null;
     const len=Number(res.headers.get('content-length')||0); if(len>1000000) return null;
     const html=(await res.text()).slice(0,1000000);
-    const text=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\s+/g,' ');
+    const text=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\\s+/g,' ');
     return {text,url:u.href};
   } catch { return null; }
 }
@@ -56,14 +69,24 @@ export async function POST(req:NextRequest){
     if(!Number.isInteger(limit)||limit<1||limit>500) return NextResponse.json({error:'Result limit must be between 1 and 500.'},{status:400});
 
     const scopeTerms = scope==='business'
-      ? ['business contact email company contact directory','company about us contact team email']
+      ? ['company contact page business email','official company website contact us email','business directory company email address','company leadership and contact information','local business public email contacts']
       : scope==='professional'
-      ? ['professional public work email staff profile contact','consultant specialist professional directory email']
+      ? ['professional work email public profile contact','consultant specialist professional directory work email','staff biography work contact email','professional association member contact email','publicly listed employee business email']
       : scope==='personal'
-      ? ['publicly published personal contact email individual contact page','individual public contact details personal email address','person website about contact email address']
-      : ['business professional public contact email directory','company team staff consultant contact email','publicly listed individual contact email'];
+      ? [
+          'public Gmail Yahoo Outlook Hotmail personal email contact',
+          'individual publicly listed Gmail address contact',
+          'person personal email address Gmail Yahoo contact page',
+          'public personal mailbox address Outlook iCloud Proton Mail',
+          'individual blog author personal email address contact',
+          'personal website contact email Gmail',
+          'public creator writer individual email address',
+          'publicly published personal email address not company contact'
+        ]
+      : ['public business and professional email directory','company team staff contact email','publicly listed individual contact email','business website contact information','professional profile email address'];
 
-    // Run several advanced searches so one narrow result set does not determine the entire list.
+    // Wider query coverage: Tavily returns up to 20 pages per query. Search snippets are
+    // also inspected so useful publicly indexed contacts are not lost when a site blocks crawling.
     const searches = await Promise.all(scopeTerms.map(async terms => {
       const response=await fetch('https://api.tavily.com/search',{
         method:'POST',
@@ -72,43 +95,69 @@ export async function POST(req:NextRequest){
         signal:AbortSignal.timeout(15000)
       });
       if(!response.ok) throw new Error(`Tavily returned ${response.status}. Check the API key, plan limits and available credits.`);
-      return await response.json() as {results?:Array<{url:string;title?:string;content?:string}>};
+      return await response.json() as {results?:SearchHit[]};
     }));
 
-    const uniquePages=new Map<string,{url:string;title?:string}>();
+    const uniquePages=new Map<string,{url:string;title:string}>();
+    const snippets:Array<{text:string;url:string;title:string}>=[];
     for(const search of searches) for(const item of search.results||[]) {
       if(!item.url) continue;
-      try { const normalized=new URL(item.url); normalized.hash=''; uniquePages.set(normalized.href,{url:normalized.href,title:item.title}); } catch {}
+      try {
+        const normalized=new URL(item.url); normalized.hash='';
+        const url=normalized.href;
+        uniquePages.set(url,{url,title:item.title||normalized.hostname});
+        if(item.content) snippets.push({text:item.content,url,title:item.title||normalized.hostname});
+      } catch {}
     }
-    const maxPages=Math.min(60,Math.max(1,Number(process.env.MAX_PAGES_PER_SEARCH)||40));
+    const maxPages=Math.min(160,Math.max(1,Number(process.env.MAX_PAGES_PER_SEARCH)||120));
     const pages=Array.from(uniquePages.values()).slice(0,maxPages);
-    const scraped=await Promise.all(pages.map(async item=>({item,page:await fetchPage(item.url)})));
-    const seen=new Set<string>(); const candidates:Array<{email:string;source:string;title:string}>=[];
-    const candidateCap=Math.min(1500,limit*4);
-    for(const {item,page} of scraped){
-      if(!page) continue;
-      for(const raw of (page.text.match(EMAIL_RE)||[])){
-        const email=raw.replace(/[.,;:!?)}\]>]+$/,'').toLowerCase();
-        if(seen.has(email)) continue;
-        seen.add(email);
-        candidates.push({email,source:page.url,title:item.title||new URL(page.url).hostname});
-        if(candidates.length>=candidateCap) break;
-      }
-      if(candidates.length>=candidateCap) break;
+
+    // Bounded crawler concurrency protects the 60-second serverless runtime.
+    const scraped:Array<{item:{url:string;title:string};page:{text:string;url:string}|null}>=[];
+    const concurrency=30;
+    for(let i=0;i<pages.length;i+=concurrency){
+      const batch=await Promise.all(pages.slice(i,i+concurrency).map(async item=>({item,page:await fetchPage(item.url)})));
+      scraped.push(...batch);
     }
 
-    // Validate in bounded batches to avoid overwhelming DNS or exhausting the function runtime.
+    const seen=new Set<string>();
+    const candidates:Array<{email:string;source:string;title:string}>=[];
+    const candidateCap=Math.min(3000,Math.max(limit*5,500));
+    function collect(text:string,source:string,title:string){
+      EMAIL_RE.lastIndex=0;
+      for(const raw of (text.match(EMAIL_RE)||[])){
+        const email=raw.replace(/[.,;:!?)}\\]>]+$/,'').toLowerCase();
+        const domain=email.split('@')[1];
+        if(!domain||seen.has(email)) continue;
+        if(scope==='personal'&&!PERSONAL_EMAIL_DOMAINS.has(domain)) continue;
+        if((scope==='business'||scope==='professional')&&PERSONAL_EMAIL_DOMAINS.has(domain)) continue;
+        seen.add(email);
+        candidates.push({email,source,title});
+        if(candidates.length>=candidateCap) return;
+      }
+    }
+    for(const hit of snippets){collect(hit.text,hit.url,hit.title);if(candidates.length>=candidateCap) break;}
+    if(candidates.length<candidateCap){
+      for(const {item,page} of scraped){
+        if(page) collect(page.text,page.url,item.title);
+        if(candidates.length>=candidateCap) break;
+      }
+    }
+
     const checked:Array<{email:string;source:string;title:string;status:Status;reason:string}>=[];
-    for(let i=0;i<Math.min(candidates.length,limit*3);i+=40){
-      const batch=await Promise.all(candidates.slice(i,Math.min(i+40,limit*3)).map(async c=>({...c,...await validate(c.email)})));
+    const validationCap=Math.min(candidates.length,Math.max(limit*3,150));
+    for(let i=0;i<validationCap;i+=50){
+      const batch=await Promise.all(candidates.slice(i,Math.min(i+50,validationCap)).map(async c=>({...c,...await validate(c.email)})));
       checked.push(...batch);
       if(checked.filter(x=>x.status!=='invalid').length>=limit) break;
     }
     const results:Result[]=checked.filter(x=>x.status!=='invalid').slice(0,limit).map(x=>({email:x.email,domain:x.email.split('@')[1],source:x.source,title:x.title,status:x.status,reason:x.reason}));
+    const personalExcluded=scope==='personal'?' Only consumer mailbox domains (such as Gmail, Yahoo, Outlook, iCloud and Proton) are included; company-domain addresses are excluded.':'';
+    const note=`Requested ${limit} leads; found ${results.length} matching public addresses. The selected number is a maximum, not a guaranteed count: results depend on relevant indexed pages, crawl permissions and available provider coverage.${personalExcluded} MX checks confirm domain mail routing, not an individual mailbox or consent.`;
     return NextResponse.json({
       results,
       stats:{sources:pages.length,pagesScanned:scraped.filter(x=>x.page).length,emailsFound:candidates.length,valid:results.filter(x=>x.status==='valid').length,unverified:results.filter(x=>x.status==='unverified').length,invalid:checked.filter(x=>x.status==='invalid').length},
-      note:'Advanced multi-query discovery checked public pages that permit this crawler. MX validation confirms domain mail routing, not an individual mailbox or consent. The selected limit is a maximum; results depend on relevant public sources.'
+      note
     });
   } catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unexpected search error'},{status:500});}
 }
