@@ -10,7 +10,7 @@ type Status = 'valid' | 'unverified';
 type Result = { email:string; domain:string; source:string; title:string; status:Status; reason:string };
 type SearchHit = { url:string; title?:string; content?:string };
 type Page = {url:string;title:string};
-type JobState = {pages:Page[];cursor:number;seen:string[];scanned:number;sourceCount:number};
+type JobState = {pages:Page[];cursor:number;seen:string[];scanned:number;sourceCount:number;found:number};
 const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
 const ROLE_LOCAL_PARTS = new Set(['info','information','contact','contacts','support','help','admin','administrator','hello','hi','team','office','sales','service','services','enquiries','enquiry','inquiries','inquiry','noreply','no-reply','donotreply','do-not-reply','mailer-daemon','webmaster','postmaster','billing','accounts','accounting','payments','orders','careers','jobs','hr','humanresources','marketing','press','media','news','newsletter','feedback','notifications','notification','privacy','legal','abuse','security','root','test','testing','demo','example','sample','user','guest','mail','email','bot','robot']);
@@ -105,14 +105,14 @@ export async function POST(req:NextRequest){
       if(!item.url)continue;
       try{const u=new URL(item.url);u.hash='';pageMap.set(u.href,{url:u.href,title:item.title||u.hostname});if(item.content)newCandidates.push(...extract(item.content,u.href,item.title||u.hostname,scope,seen));}catch{}
     }
-    state={pages:Array.from(pageMap.values()).slice(0,240),cursor:0,seen:Array.from(seen).slice(-12000),scanned:0,sourceCount:pageMap.size};
+    state={pages:Array.from(pageMap.values()).slice(0,240),cursor:0,seen:Array.from(seen).slice(-12000),scanned:0,sourceCount:pageMap.size,found:0};
   }else{
     state=body.state as JobState;
     if(!state||!Array.isArray(state.pages)||!Array.isArray(state.seen)||!Number.isInteger(state.cursor))return NextResponse.json({error:'Extraction session expired. Start a new search.'},{status:400});
     for(const email of state.seen)seen.add(String(email).toLowerCase());
   }
   const snippetResults=phase==='start'?await makeResults(newCandidates.slice(0,Math.max(0,limit))):[];
-  const remaining=limit-snippetResults.length;
+  state={...state,found:snippetResults.length};\n  const remaining=limit-snippetResults.length;
   const batchSize=6;
   const batch=remaining>0?state.pages.slice(state.cursor,state.cursor+batchSize):[];
   const fetched=await Promise.all(batch.map(async item=>({item,page:await fetchPage(item.url)})));
@@ -121,10 +121,10 @@ export async function POST(req:NextRequest){
   const pageResults=remaining>0?await makeResults(crawledCandidates.slice(0,remaining)): [];
   state={...state,cursor:state.cursor+batch.length,seen:Array.from(seen).slice(-12000),scanned:state.scanned+fetched.filter(x=>x.page).length};
   const results=[...snippetResults,...pageResults].slice(0,limit);
-  const done=results.length>=limit||state.cursor>=state.pages.length;
+  state={...state,found:state.found+pageResults.length};\n  const done=state.found>=limit||state.cursor>=state.pages.length;
   const totalScanned=state.scanned;
   return NextResponse.json({
-    results, state, done, progress:{target:limit,found:results.length,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
+    results, state, done, progress:{target:limit,found:state.found,scanned:totalScanned,totalSources:state.sourceCount,processedPages:state.cursor,totalPages:state.pages.length},
     note:`Country filter: ${country}. ${results.length} addresses found so far. MX checks confirm domain mail routing only; they do not confirm that a specific mailbox exists or can receive messages. The extractor scans publicly indexed pages and pages that permit crawling; 10,000 is the maximum target, not a guaranteed supply of public addresses.`
   });
  }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Unexpected search error'},{status:500});}
