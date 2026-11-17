@@ -11,7 +11,7 @@ type Result = { email:string; domain:string; source:string; title:string; status
 type SearchHit = { url:string; title?:string; content?:string };
 type Page = {url:string;title:string};
 type JobState = {pages:Page[];cursor:number;seen:string[];scanned:number;sourceCount:number;found:number};
-const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
+const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
 const ROLE_LOCAL_PARTS = new Set(['info','information','contact','contacts','support','help','admin','administrator','hello','hi','team','office','sales','service','services','enquiries','enquiry','inquiries','inquiry','noreply','no-reply','donotreply','do-not-reply','mailer-daemon','webmaster','postmaster','billing','accounts','accounting','payments','orders','careers','jobs','hr','humanresources','marketing','press','media','news','newsletter','feedback','notifications','notification','privacy','legal','abuse','security','root','test','testing','demo','example','sample','user','guest','mail','email','bot','robot']);
 const PLACEHOLDER_LOCAL_PARTS = /(?:^|[._-])(test|testing|fake|dummy|sample|example|placeholder|invalid|unknown|nobody|none)(?:$|[._-])/i;
@@ -20,9 +20,9 @@ const PERSONAL_EMAIL_DOMAINS = new Set(['gmail.com','googlemail.com','yahoo.com'
 function isPlausiblePersonAddress(email:string):boolean {
   const rawLocal=email.toLowerCase().split('@')[0]; const local=rawLocal.split('+')[0];
   if(!local||local.length<3||!/[a-z]/.test(local)||ROLE_LOCAL_PARTS.has(local)||PLACEHOLDER_LOCAL_PARTS.test(local)) return false;
-  if(/^(?:info|contact|support|admin|sales|hello|team|office|service|billing|jobs|careers|noreply|no-reply|webmaster|newsletter|marketing|press|media|help|feedback|orders|accounts|hr)[._-]?\\d*$/i.test(local)) return false;
-  if(/^\\d+$/.test(local)||/^[a-f0-9]{16,}$/i.test(local)) return false;
-  const digits=(local.match(/\\d/g)||[]).length;
+  if(/^(?:info|contact|support|admin|sales|hello|team|office|service|billing|jobs|careers|noreply|no-reply|webmaster|newsletter|marketing|press|media|help|feedback|orders|accounts|hr)[._-]?\d*$/i.test(local)) return false;
+  if(/^\d+$/.test(local)||/^[a-f0-9]{16,}$/i.test(local)) return false;
+  const digits=(local.match(/\d/g)||[]).length;
   if(local.length>=8&&digits/local.length>0.45) return false;
   if(local.length>=20&&!/[._-]/.test(local)&&digits>=3) return false;
   return true;
@@ -47,7 +47,7 @@ async function fetchPage(raw:string):Promise<{text:string;url:string}|null>{
     const type=res.headers.get('content-type')||'';if(!res.ok||!type.includes('text/html'))return null;
     const len=Number(res.headers.get('content-length')||0);if(len>1000000)return null;
     const html=(await res.text()).slice(0,1000000);
-    const text=html.replace(/<script\\b[^>]*>[\\s\\S]*?<\\/script>/gi,' ').replace(/<style\\b[^>]*>[\\s\\S]*?<\\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\\s+/g,' ');
+    const text=html.replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi,' ').replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi,' ').replace(/<[^>]+>/g,' ').replace(/&commat;|&#64;|&#x40;/gi,'@').replace(/&period;|&#46;|&#x2e;/gi,'.').replace(/&amp;/gi,'&').replace(/\s+/g,' ');
     return {text,url:u.href};
   }catch{return null;}
 }
@@ -61,7 +61,7 @@ function extract(text:string,source:string,title:string,scope:string,seen:Set<st
   const out:Array<{email:string;source:string;title:string}>=[];
   EMAIL_RE.lastIndex=0;
   for(const raw of (text.match(EMAIL_RE)||[])){
-    const email=raw.replace(/[.,;:!?)}\\]>]+$/,'').toLowerCase();const domain=email.split('@')[1];
+    const email=raw.replace(/[.,;:!?)}\]>]+$/,'').toLowerCase();const domain=email.split('@')[1];
     if(!domain||seen.has(email)||!isPlausiblePersonAddress(email))continue;
     if(scope==='personal'&&!PERSONAL_EMAIL_DOMAINS.has(domain))continue;
     if((scope==='business'||scope==='professional')&&PERSONAL_EMAIL_DOMAINS.has(domain))continue;
