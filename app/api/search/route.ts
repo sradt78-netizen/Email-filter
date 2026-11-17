@@ -11,6 +11,31 @@ type Result = { email:string; domain:string; source:string; title:string; status
 type SearchHit = { url:string; title?:string; content?:string };
 const EMAIL_RE = /[a-zA-Z0-9.!#$%&'*+/=?^`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)+/g;
 const BLOCKED = new Set(['example.com','example.org','example.net','test.com','domain.com','yourdomain.com']);
+const ROLE_LOCAL_PARTS = new Set([
+  'info','information','contact','contacts','support','help','admin','administrator','hello','hi',
+  'team','office','sales','service','services','enquiries','enquiry','inquiries','inquiry',
+  'noreply','no-reply','donotreply','do-not-reply','mailer-daemon','webmaster','postmaster',
+  'billing','accounts','accounting','payments','orders','careers','jobs','hr','humanresources',
+  'marketing','press','media','news','newsletter','feedback','notifications','notification',
+  'privacy','legal','abuse','security',' webmaster','root','administrator','test','testing',
+  'demo','example','sample','user','guest','mail','email','bot','robot'
+]);
+const PLACEHOLDER_LOCAL_PARTS = /(?:^|[._-])(test|testing|fake|dummy|sample|example|placeholder|invalid|unknown|nobody|none)(?:$|[._-])/i;
+
+// These checks remove role inboxes and obvious synthetic/placeholder identifiers.
+// They cannot establish that a human mailbox exists.
+function isPlausiblePersonAddress(email:string):boolean {
+  const rawLocal=email.toLowerCase().split('@')[0];
+  const local=rawLocal.split('+')[0];
+  if(!local || local.length<3 || !/[a-z]/.test(local)) return false;
+  if(ROLE_LOCAL_PARTS.has(local) || PLACEHOLDER_LOCAL_PARTS.test(local)) return false;
+  if(/^(?:info|contact|support|admin|sales|hello|team|office|service|billing|jobs|careers|noreply|no-reply|webmaster|newsletter|marketing|press|media|help|feedback|orders|accounts|hr)[._-]?\d*$/i.test(local)) return false;
+  if(/^\d+$/.test(local) || /^[a-f0-9]{16,}$/i.test(local)) return false;
+  const digits=(local.match(/\d/g)||[]).length;
+  if(local.length>=8 && digits/local.length>0.45) return false;
+  if(local.length>=20 && !/[._-]/.test(local) && digits>=3) return false;
+  return true;
+}
 
 // Personal means a publicly listed address on a consumer mailbox provider.
 // Company-owned domains are deliberately excluded from Personal-only results.
@@ -55,7 +80,7 @@ async function fetchPage(raw:string):Promise<{text:string;url:string}|null>{
 async function validate(email:string):Promise<{status:Status;reason:string}>{
   const [local,domain]=email.toLowerCase().split('@');
   if(!local||local.length>64||!domain||domain.length>253||BLOCKED.has(domain)||local.startsWith('.')||local.endsWith('.')||local.includes('..')) return {status:'invalid',reason:'Malformed or placeholder address'};
-  try { const mx=await dns.resolveMx(domain); return mx.length?{status:'valid',reason:'Domain has MX mail-routing records'}:{status:'invalid',reason:'Domain has no MX records'}; }
+  try { const mx=await dns.resolveMx(domain); return mx.length?{status:'valid',reason:'Domain has MX records; individual mailbox not verified'}:{status:'invalid',reason:'Domain has no MX records'}; }
   catch { try { await dns.resolve4(domain); return {status:'unverified',reason:'Domain resolves but MX could not be confirmed'}; } catch { return {status:'invalid',reason:'Domain does not resolve'}; } }
 }
 
@@ -118,7 +143,7 @@ export async function POST(req:NextRequest){
       for(const raw of (text.match(EMAIL_RE)||[])){
         const email=raw.replace(/[.,;:!?)}\]>]+$/,'').toLowerCase();
         const domain=email.split('@')[1];
-        if(!domain||seen.has(email)) continue;
+        if(!domain||seen.has(email)||!isPlausiblePersonAddress(email)) continue;
         if(scope==='personal'&&!PERSONAL_EMAIL_DOMAINS.has(domain)) continue;
         if((scope==='business'||scope==='professional')&&PERSONAL_EMAIL_DOMAINS.has(domain)) continue;
         seen.add(email);
@@ -156,7 +181,7 @@ export async function POST(req:NextRequest){
     }
     const results:Result[]=checked.filter(x=>x.status!=='invalid').slice(0,limit).map(x=>({email:x.email,domain:x.email.split('@')[1],source:x.source,title:x.title,status:x.status,reason:x.reason}));
     const personalExcluded=scope==='personal'?' Only consumer mailbox domains (such as Gmail, Yahoo, Outlook, iCloud and Proton) are included; company-domain addresses are excluded.':'';
-    const note=`Requested ${limit} leads; found ${results.length} matching public addresses. The selected number is a maximum, not a guaranteed count: results depend on relevant indexed pages, crawl permissions and available provider coverage.${personalExcluded} MX checks confirm domain mail routing, not an individual mailbox or consent.`;
+    const note=`Requested up to ${limit} leads; found ${results.length} public addresses after filtering role-based inboxes, placeholders and obvious synthetic-looking names. Only addresses actually present in indexed snippets or crawled public pages are considered; the system does not generate or guess addresses. Counts depend on source coverage and crawl permissions.${personalExcluded} A domain MX record does not prove that an individual mailbox exists or that the person consented to contact.`;
     return NextResponse.json({
       results,
       stats:{sources:pages.length,pagesScanned:scraped.filter(x=>x.page).length,emailsFound:candidates.length,valid:results.filter(x=>x.status==='valid').length,unverified:results.filter(x=>x.status==='unverified').length,invalid:checked.filter(x=>x.status==='invalid').length},
